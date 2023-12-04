@@ -8,9 +8,7 @@
   <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.16.0/umd/popper.min.js"></script>
   <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
-  {{-- @if(Session::has('download.in.the.next.request'))
-         <meta http-equiv="refresh" content="5;url={{ Session::get('download.in.the.next.request') }}">
-  @endif --}}
+
 </head>
 <body>
   <div class="container">
@@ -37,10 +35,15 @@
         @else
             <a href="{{ route('connect.docusign') }}" class="btn btn-primary">Connect Docusign</a>
         @endif
+
           
       </div>
     </div>
-  
+  @if(isset($redirectDownload) && $redirectDownload)
+    <script>
+        window.location.href = "{{ route('docusign.downloadEnvelope') }}";
+    </script>
+@endif
   </div>
 </body>
 </html>

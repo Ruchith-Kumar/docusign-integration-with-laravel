@@ -8,6 +8,8 @@ use DocuSign\eSign\Api\EnvelopesApi;
 use DocuSign\eSign\Client\ApiClient;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Storage; 
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Illuminate\Http\Response;
 use GuzzleHttp\Client;
 use Exception;
@@ -25,9 +27,12 @@ class DocusignController extends Controller
 
     // private $clientService;
 
-    public function index()
+    public function index(Request $request)
     {
-        return view('docusign');
+
+        
+        return view('docusign')->with('redirectDownload', true);
+        
     }
   
     /**
@@ -50,13 +55,14 @@ class DocusignController extends Controller
             $url = "https://account-d.docusign.com/oauth/auth?";
   
             $botUrl = $url . $queryBuild;
-  
+
+            
             return redirect()->to($botUrl);
         } catch (Exception $e) {
             return redirect()->back()->with('error', 'Something Went wrong !');
         }
     }
-  
+    
     /**
      * This function called when you auth your application with docusign
      *
@@ -65,17 +71,17 @@ class DocusignController extends Controller
     public function callback(Request $request)
     {
         $response = Http::withBasicAuth(env('DOCUSIGN_CLIENT_ID'), env('DOCUSIGN_CLIENT_SECRET'))
-            ->post('https://account-d.docusign.com/oauth/token', [
-                'grant_type' => 'authorization_code',
-                'code' => $request->code,
-            ]);
-  
+        ->post('https://account-d.docusign.com/oauth/token', [
+            'grant_type' => 'authorization_code',
+            'code' => $request->code,
+        ]);
+        
         $result = $response->json();    
         $request->session()->put('docusign_auth_code', $result['access_token']);
-      
+        
         return redirect()->route('docusign')->with('success', 'Docusign Successfully Connected');
     }
-  
+    
     /**
      * Write code on Method
      *
@@ -86,41 +92,40 @@ class DocusignController extends Controller
         try {
             $this->args = $this->getTemplateArgs();
             $args = $this->args;
-
+            
             $envelope_args = $args["envelope_args"];
-
+            
             // Create the envelope request object
             $envelope_definition = $this->makeEnvelopeFileObject($args["envelope_args"]);
             $envelope_api = $this->getEnvelopeApi();
-
+            
             $api_client = new \DocuSign\eSign\client\ApiClient($this->config);
             $envelope_api = new \DocuSign\eSign\Api\EnvelopesApi($api_client);
-
+            
             $results = $envelope_api->createEnvelope($args['account_id'], $envelope_definition);
             $envelopeId = $results->getEnvelopeId();
-
+            
             // Store the envelope ID in the session
             $request->session()->put('docusign_envelope_id', $envelopeId);
-
+            
             $authentication_method = 'None';
-
+            
             $recipient_view_request = new \DocuSign\eSign\Model\RecipientViewRequest([
                 'authentication_method' => $authentication_method,
                 'client_user_id' => $envelope_args['signer_client_id'],
                 'recipient_id' => '1',
-                'return_url' => $envelope_args['ds_return_url'] , // Route to the download function
+                'return_url' => $envelope_args['ds_return_url'] , 
                 'user_name' => 'savani',
                 'email' => 'savani@gmail.com',
             ]);
-
+            session(['envelopeId' => $envelopeId]);
             $results = $envelope_api->createRecipientView($args['account_id'], $envelopeId, $recipient_view_request);
-
+            
             return redirect()->to($results['url']);
         } catch (Exception $e) {
             dd($e->getMessage());
         }
 
-        $this->downloadEnvelopeDocument($request);
     }
 
 
@@ -194,6 +199,8 @@ class DocusignController extends Controller
      */
     public function getEnvelopeApi(): EnvelopesApi
     {   
+        $this->args = $this->getTemplateArgs();
+        $args = $this->args;
         $this->config = new Configuration();
         $this->config->setHost($this->args['base_path']);
         $this->config->addDefaultHeader('Authorization', 'Bearer ' . $this->args['ds_access_token']);    
@@ -210,91 +217,38 @@ class DocusignController extends Controller
     private function getTemplateArgs()
     {   
 
-        // $routes = ['docusign.downloadEnvelope', 'docusign'];
-
-        // $returnUrls = [];
-
-        // foreach ($routes as $route) {
-        //     $returnUrls[$route] = route($route);
-        // }
-
         $args = [
             'account_id' => env('DOCUSIGN_ACCOUNT_ID'),
             'base_path' => env('DOCUSIGN_BASE_URL'),
             'ds_access_token' => Session::get('docusign_auth_code'),
             'envelope_args' => [ 
                     'signer_client_id' => $this->signer_client_id,
-                    'ds_return_url' => route('docusign.downloadEnvelope'), 
+                    'ds_return_url' => route('docusign'), 
             ],
         ];
            
         return $args;
     }
-
+    
 
     public function downloadEnvelopeDocument(Request $request)
     {
-        try {
-
-            $envelopeId = $request->session()->get('docusign_envelope_id');
-    
-            if (!$envelopeId) {
-                return redirect()->route('docusign')->with('error', 'Envelope ID not found.');
-            }
-    
-            $access_token = session::get('docusign_auth_code');
-    
-            $config = new Configuration();
-            $config->setHost(env('DOCUSIGN_BASE_URL'));
-            $config->addDefaultHeader('Authorization', 'Bearer ' . $access_token);
-    
-            $api_client = new ApiClient($config);
-            $envelope_api = new EnvelopesApi($api_client);
-    
-            $accountId = env('DOCUSIGN_ACCOUNT_ID');
-            $temp_file = $envelope_api->getDocument($accountId, 'combined', $envelopeId);
-            $temp_file->rewind();
-            $contents=$temp_file->fread($temp_file->fstat()['size']);
-            
-            $directory = storage_path('app\signed_documents');
-            if (!File::isDirectory($directory)) {
-                File::makeDirectory($directory, 0755, true, true);
-            }
-            
-            $savePath = $directory . '/' . $envelopeId . '.pdf';
-            // dd($savePath);
-            file_put_contents($savePath, $contents);
-    
-            if (file_exists($savePath)) {
-
-                $headers = [
-                'Content-Type' => 'application/pdf',
-            ];
-
-                $fileContent = file_get_contents($savePath);
-
-                    $response = new Response(file_get_contents($savePath), 200, $headers);
-
-                $response->header('Content-Disposition', 'attachment; filename=signed_document.pdf');
-
-            //     $response = new \Symfony\Component\HttpFoundation\BinaryFileResponse($savePath, 200, $headers);
-            // $response->setContentDisposition('attachment', 'signed_document.pdf');
-
-            // Redirect back to the home page
-            $response->send();
-
-            return redirect()->route('docusign');
-    
-
-
-            
-            } else {
-                return redirect()->route('docusign')->with('error', 'Signed document not found in local storage.');
-            }
-        } catch (Exception $e) {
-            dd($e->getMessage());
-        }
+            if(session('envelopeId')){
+                $accountId = env('DOCUSIGN_ACCOUNT_ID');
+                $envelope_api = $this->getEnvelopeApi();
+                $envelopeId=session('envelopeId');
+                $temp_file = $envelope_api->getDocument($accountId,  '1', $envelopeId);
+                if(session('save_filename')){
+                    $filename=session('save_filename');
+                }
+                else{
+                    $filename='signed_doc';
+                }
+                $filePath = 'documents/'.$filename.'.pdf';
+                Storage::put($filePath, file_get_contents($temp_file->getPathname()));
+                return response()->download(storage_path("app/$filePath"));
+                }
+        
     }
     
-
 }

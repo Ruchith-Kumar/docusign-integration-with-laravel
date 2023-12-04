@@ -22,8 +22,4 @@ Route::get('docusign',[DocusignController::class, 'index'])->name('docusign');
 Route::get('connect-docusign',[DocusignController::class, 'connectDocusign'])->name('connect.docusign');
 Route::get('docusign/callback',[DocusignController::class,'callback'])->name('docusign.callback');
 Route::get('sign-document',[DocusignController::class,'signDocument'])->name('docusign.sign');
-// Route::get('docusign/download',[DocusignController::class,'downloadEnvelopeDocument'])->name('docusign.download');
 Route::get('download-envelope', [DocusignController::class,'downloadEnvelopeDocument'])->name('docusign.downloadEnvelope');
-
-Route::get('/final-page', [DocusignController::class,'finalPage'])->name('final.page');
-
